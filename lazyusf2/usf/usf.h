@@ -2,7 +2,10 @@
 
 #ifndef _USF_H_
 #define _USF_H_
+
+#ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
+#endif
 
 
 #include <stdint.h>

@@ -1032,12 +1032,13 @@ void alist_iirf(
 }
 
 /* Perform a clamped gain, then attenuate it back by an amount */
-void alist_overload(struct hle_t* hle, uint16_t dmem, int16_t count, int16_t gain, uint16_t attenuation)
+void alist_overload(struct hle_t* hle, uint16_t dmem, int16_t count, int16_t gain, int16_t attenuation)
 {
     int16_t accu;
     int16_t * sample = (int16_t*)(hle->alist_buffer + dmem);
 
-    while (count != 0) {
+    while (count != 0)
+    {
         accu = clamp_s16(*sample * gain);
         *sample = (accu * attenuation) >> 16;
         sample++;

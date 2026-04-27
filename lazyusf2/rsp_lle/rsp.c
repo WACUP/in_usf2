@@ -105,5 +105,7 @@ int32_t init_rsp_lle(usf_state_t * state)
         &state->g_dp.dpc_regs[DPC_TMEM_REG],
         state);
 
+    state->hle.hle_gfx = 1;
+
     return 0;
 }

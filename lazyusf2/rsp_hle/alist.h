@@ -159,7 +159,7 @@ void alist_overload(
         uint16_t dmem,
         int16_t count,
         int16_t gain,
-        uint16_t attenuation);
+        int16_t attenuation);
 
 /*
  * Audio flags

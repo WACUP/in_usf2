@@ -27,6 +27,12 @@
 /*
  * Streaming SIMD Extensions version import management
  */
+#ifdef __aarch64__
+#define ARCH_MIN_ARM_NEON 1
+#else
+#define ARCH_MIN_SSE2 1
+#endif
+
 #ifdef ARCH_MIN_SSSE3
 #define ARCH_MIN_SSE2
 #include <tmmintrin.h>
@@ -75,6 +81,8 @@ int32_t init_rsp_lle(usf_state_t * state);
 /* Allocate the RSP CPU loop to its own functional space. */
 NOINLINE static void run_task(usf_state_t * state);
 #include "execute.h"
+
+void rsp_lle_run_task(usf_state_t * state);
 
 #ifdef SP_EXECUTE_LOG
 #include "matrix.h"

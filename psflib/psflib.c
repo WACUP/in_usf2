@@ -753,6 +753,7 @@ int psf_want_status(psf_load_state * state)
 
 void psf_status(psf_load_state * state, const char * message, int indent)
 {
+#ifdef _DEBUG
 	if (state->status_target)
 	{
 		if (indent)
@@ -765,4 +766,5 @@ void psf_status(psf_load_state * state, const char * message, int indent)
 		}
 		state->status_target(state->status_context, message);
 	}
+#endif
 }
