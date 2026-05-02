@@ -6,13 +6,11 @@
 #include <loader/loader/paths.h>
 #include <loader/loader/delay_load_helper.h>
 #include <loader/hook/squash.h>
-#include <nu/AutoCharFn.h>
-#include <string>
 #include <map>
 #include <vector>
 #include "resource.h"
 
-#define PLUGIN_VER L"0.9.4"
+#define PLUGIN_VER L"0.9.5"
 
 // wasabi based services for localisation support
 SETUP_API_LNG_VARS;
@@ -134,9 +132,11 @@ usf_player* create_usf_player(const wchar_t* filename, const bool info_only, con
         {
             usf_clear(player->player);
 
-            AutoCharFn fn(filename);
-            if (psf_load(fn, &player->callbacks, 0x21, (!info_only ? usf_load_cb : nullptr), (!info_only ?
-                                        player : nullptr), usf_info_cb, player, 1, nullptr, nullptr) >= 0)
+            char fn[MAX_PATH];
+            if (psf_load(ConvertUnicodeFn(fn, ARRAYSIZE(fn), filename, CP_ACP),
+                         &player->callbacks, 0x21, (!info_only ? usf_load_cb :
+                         nullptr), (!info_only ? player : nullptr), usf_info_cb,
+                         player, 1, nullptr, nullptr) >= 0)
             {
                 return player;
             }
@@ -334,25 +334,32 @@ void stop()
     }
 }
 
-int parse_usf_time(const std::string& timeStr)
+int parse_usf_time(const char* time_str)
 {
-    if (!timeStr.empty())
+    if (time_str && *time_str)
     {
         int minutes = 0;
         float seconds = 0.f;
 
         // Handle MM:SS.m or MM:SS
-        if (sscanf(timeStr.c_str(), "%d:%f", &minutes, &seconds) == 2)
+        if (sscanf(time_str, "%d:%f", &minutes, &seconds) == 2)
         {
             return (minutes * 60000) + (int)(seconds * 1000.0f);
         }
         // Handle SS.m or just seconds
-        else if (sscanf(timeStr.c_str(), "%f", &seconds) == 1)
+        else if (sscanf(time_str, "%f", &seconds) == 1)
         {
             return (int)(seconds * 1000.0f);
         }
     }
     return 0;
+}
+
+int get_player_length(usf_player* player)
+{
+    const int length = parse_usf_time(player->tags["length"].c_str());
+    return ((length > 0) ? (length + parse_usf_time(player->
+             tags["fade"].c_str())) : (180 * 1000)/*TODO*/);
 }
 
 int play(const in_char* filename)
@@ -385,9 +392,7 @@ int play(const in_char* filename)
         usf_set_compare(player->player, player->tags["_enablecompare"] == "1");
         usf_set_fifo_full(player->player, player->tags["_enablefifofull"] == "1");
 
-        const int length = parse_usf_time(player->tags["length"]);
-        g_length = ((length > 0) ? (length + parse_usf_time(player->
-                             tags["fade"])) : (180 * 1000)/*TODO*/);
+        g_length = get_player_length(player);
 
         if (StartPlaybackThread(DecodeThread, player, 0, nullptr) == nullptr)
         {
@@ -467,22 +472,23 @@ void getfileinfo(const wchar_t* filename, wchar_t* title, int* len_ms)
     {
         if (title)
         {
-            std::string t = player->tags["title"];
-            if (t.empty())
+            const std::string& t = player->tags["title"];
+            if (!t.empty())
+            {
+                ConvertANSI(t.c_str(), (const int)t.size(), CP_ACP, title,
+                                       GETFILEINFO_TITLE_LENGTH, nullptr);
+            }
+            else
             {
                 const wchar_t* fn = wcsrchr(filename, L'\\');
-                t = (fn ? std::string((const char*)fn + 1) : "Unknown USF");
+                ConvertANSI((fn ? ((const char*)fn + 1) : "Unknown USF"), (fn ? -1 :
+                             11), CP_ACP, title, GETFILEINFO_TITLE_LENGTH, nullptr);
             }
-
-            ConvertANSI(t.c_str(), (const int)t.size(), CP_ACP, title,
-                                   GETFILEINFO_TITLE_LENGTH, nullptr);
         }
 
         if (len_ms)
         {
-            const int length = parse_usf_time(player->tags["length"]);
-            *len_ms = ((length > 0) ? (length + parse_usf_time(player->
-                                tags["fade"])) : (180 * 1000)/*TODO*/);
+            *len_ms = get_player_length(player);
         }
 
         delete player;
@@ -618,7 +624,7 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
         if (player != nullptr)
         {
             size_t copied = 0;
-            std::string t = player->tags[(album ? "game" : (publisher ? "copyright" : data))];
+            const std::string& t = player->tags[(album ? "game" : (publisher ? "copyright" : data))];
             if (!t.empty())
             {
                 ConvertANSI(t.c_str(), (const int)t.size(), CP_ACP, dest, destlen, nullptr);
@@ -634,11 +640,10 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
         if (player != nullptr)
         {
             int ret = 0;
-            const int length = parse_usf_time(player->tags["length"]);
-            I2WStrLen(((length > 0) ? ((length + parse_usf_time(player->
-                      tags["fade"])) / (!length_seconds ? 1 : 1000)) :
-                      (!length_seconds ? (180 * 1000) : 180)/*TODO*/),
-                      dest, destlen, &ret);
+            const int length = get_player_length(player);
+            I2WStrLen(((length > 0) ? (length / (!length_seconds ? 1 :
+                       1000)) : (!length_seconds ? (180 * 1000) : 180)
+                                      /*TODO*/), dest, destlen, &ret);
 
             delete player;
             return ret;
