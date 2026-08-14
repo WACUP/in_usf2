@@ -6,11 +6,12 @@
 #include <loader/loader/paths.h>
 #include <loader/loader/delay_load_helper.h>
 #include <loader/hook/squash.h>
+#include <loader/hook/lock.h>
 #include <map>
 #include <vector>
 #include "resource.h"
 
-#define PLUGIN_VER L"0.9.5"
+#define PLUGIN_VER L"0.9.7"
 
 // wasabi based services for localisation support
 SETUP_API_LNG_VARS;
@@ -55,11 +56,7 @@ public:
         FILE* fp = fopen(path, "rb");
         if (fp && ctx && !((usf_player*)ctx)->file_buf)
         {
-            ((usf_player*)ctx)->file_buf = (char*)SafeMalloc(USHRT_MAX);
-            if (((usf_player*)ctx)->file_buf)
-            {
-                setvbuf(fp, ((usf_player*)ctx)->file_buf, _IOFBF, USHRT_MAX);
-            }
+            ((usf_player*)ctx)->file_buf = SetFileVBuf(fp);
         }
         return (void*)fp;
     }
@@ -302,13 +299,15 @@ void about(HWND hwndParent)
 
 void stop()
 {
-    EnterCriticalSection(&g_player_cs);
+    LockGuard lock(g_player_cs);
+
     if (g_player != nullptr)
     {
         g_player->kill_thread = true;
         g_player = nullptr;
     }
-    LeaveCriticalSection(&g_player_cs);
+    
+    lock.Release();
 
     if (decode_thread != nullptr)
     {
@@ -400,9 +399,9 @@ int play(const in_char* filename)
             return 1;
         }
 
-        EnterCriticalSection(&g_player_cs);
+        const LockGuard lock(g_player_cs);
+
         g_player = player;
-        LeaveCriticalSection(&g_player_cs);
         return 0;
     }
     return 1;
@@ -609,7 +608,7 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
     if (SameStrA(data, "family"))
     {
         LPCWSTR e = FindPathExtension(fn);
-        if ((e != NULL) && (SameStr(e, L"USF") || SameStr(e, L"MINIUSF")))
+        if ((e != NULL) && (!FastCompare(e, L"USF") || !FastCompare(e, L"MINIUSF")))
         {
             size_t copied = 0;
             LngStringCopyGetLen(IDS_FAMILY_STRING, dest, destlen, &copied);
@@ -754,4 +753,4 @@ extern "C" __declspec (dllexport) void winampGetExtendedRead_close(intptr_t hand
     }
 }
 
-DLL_DELAY_LOAD_HANDLER
+DLL_DELAY_LOAD_HANDLER_OVERRIDE
