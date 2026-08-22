@@ -11,7 +11,7 @@
 #include <vector>
 #include "resource.h"
 
-#define PLUGIN_VER L"0.9.7"
+#define PLUGIN_VER L"0.9.8"
 
 // wasabi based services for localisation support
 SETUP_API_LNG_VARS;
@@ -24,8 +24,8 @@ static const GUID InUSF2LangGUID =
 class usf_player
 {
 public:
-    usf_player(const bool _convert_to_mono) : player(nullptr), seek_needed(-1), kill_thread(false),
-                                              convert_to_mono(_convert_to_mono), file_buf(nullptr)
+    usf_player(const bool _convert_to_mono) : player(nullptr), filename(nullptr), seek_needed(-1),
+                          kill_thread(false), convert_to_mono(_convert_to_mono), file_buf(nullptr)
     {
         callbacks.path_separators = "\\/";
         callbacks.context = this;
@@ -42,6 +42,13 @@ public:
         {
             usf_shutdown(player);
             SafeFree(player);
+            player = nullptr;
+        }
+
+        if (filename != nullptr)
+        {
+            SafeFree(filename);
+            filename = nullptr;
         }
 
         if (file_buf != nullptr)
@@ -82,6 +89,7 @@ public:
     }
 
     void* player;
+    wchar_t* filename;
     int seek_needed;
     bool kill_thread;
     bool convert_to_mono;   // memory hole after this
@@ -91,11 +99,12 @@ public:
 };
 
 extern In_Module plugin;
-usf_player* g_player = nullptr;
+usf_player* g_player = nullptr, *g_metadata_info = nullptr;
 HANDLE decode_thread = nullptr;
-int /*g_decode_pos = 0,*/ g_length = -1, g_seek_needed = -1;
+int g_length = -1, g_seek_needed = -1;
 bool paused = false;
-CRITICAL_SECTION g_player_cs = {}/*, g_info_cs = {}*/;
+CRITICAL_SECTION g_player_cs = {}, g_info_cs = {};
+FILETIME ftLastWriteTime = {};
 
 static int usf_load_cb(void* ctx, const uint8_t* exe, size_t sz,
                             const uint8_t* reserved, size_t rsz)
@@ -128,6 +137,8 @@ usf_player* create_usf_player(const wchar_t* filename, const bool info_only, con
         if (player->player)
         {
             usf_clear(player->player);
+
+            player->filename = SafeWideDup(filename);
 
             char fn[MAX_PATH];
             if (psf_load(ConvertUnicodeFn(fn, ARRAYSIZE(fn), filename, CP_ACP),
@@ -225,22 +236,21 @@ DWORD WINAPI DecodeThread(void* param)
             }
 
             const int bytes_to_write = (int)(count * (!this_player->convert_to_mono ? 4 : 2));
-            while (((plugin.outMod->CanWrite() < bytes_to_write) << (plugin.dsp_isactive() ? 1 : 0)) && !this_player->kill_thread)
+            const bool dsp_isactive = plugin.dsp_isactive();
+            while (((plugin.outMod->CanWrite() < bytes_to_write) << (dsp_isactive ? 1 : 0)) && !this_player->kill_thread)
             {
                 SleepEx(10, TRUE);
             }
 
             if (!this_player->kill_thread)
             {
-                // TODO
-                int l = (int)count;
-                if (plugin.dsp_isactive()) l = plugin.dsp_dosamples((short int*)sample_buffer, l / nch / (16 / 8), 16, nch, 44100) * (nch * (16 / 8));
-                //if (plugin.SAAddPCMData) plugin.SAAddPCMData((char*)sample_buffer, nch, 16, decode_pos_ms);
+                if (dsp_isactive)
+                {
+                    plugin.dsp_dosamples((short int*)sample_buffer, (int)
+                                      count, 16, nch, 44100) * (nch * 2);
+                }
 
-                plugin.SAAddPCMData((char*)sample_buffer, nch, 16, /*g_decode_pos/*/plugin.outMod->GetWrittenTime()/**/);
-                /*if (plugin.VSAAddPCMData) plugin.VSAAddPCMData((char *)sample_buffer,nch,16,decode_pos_ms);*/
-
-                //g_decode_pos += (bytes_to_write / nch / (16 / 8));
+                plugin.SAAddPCMData((char*)sample_buffer, nch, 16, plugin.outMod->GetWrittenTime());
 
                 plugin.outMod->Write((char*)sample_buffer, bytes_to_write);
             }
@@ -271,7 +281,7 @@ DWORD WINAPI DecodeThread(void* param)
 static int init(void)
 {
     InitializeCriticalSectionEx(&g_player_cs, 400, CRITICAL_SECTION_NO_DEBUG_INFO);
-    //InitializeCriticalSectionEx(&g_info_cs, 400, CRITICAL_SECTION_NO_DEBUG_INFO);
+    InitializeCriticalSectionEx(&g_info_cs, 400, CRITICAL_SECTION_NO_DEBUG_INFO);
 
 	StartPluginLangWithDesc(plugin.hDllInstance, InUSF2LangGUID,
 			  IDS_PLUGIN_NAME, PLUGIN_VER, &plugin.description);
@@ -280,7 +290,7 @@ static int init(void)
 
 void quit(void)
 {
-    //DeleteCriticalSection(&g_info_cs);
+    DeleteCriticalSection(&g_info_cs);
     DeleteCriticalSection(&g_player_cs);
 }
 
@@ -363,7 +373,6 @@ int get_player_length(usf_player* player)
 
 int play(const in_char* filename)
 {
-    //g_decode_pos = 0;
     g_length = -1;
 
     const bool convert_to_mono = PlaybackIsMono();
@@ -595,81 +604,6 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
     {
         return 0;
     }
-
-    if (!fn || !fn[0] || SameStrA(data, "reset"))
-    {
-        return 0;
-    }
-
-    const bool album = SameStrA(data, "album"),
-               track = SameStrA(data, "track"),
-               publisher = SameStrA(data, "publisher"),
-               length_seconds = SameStrA(data, "length_seconds");
-    if (SameStrA(data, "family"))
-    {
-        LPCWSTR e = FindPathExtension(fn);
-        if ((e != NULL) && (!FastCompare(e, L"USF") || !FastCompare(e, L"MINIUSF")))
-        {
-            size_t copied = 0;
-            LngStringCopyGetLen(IDS_FAMILY_STRING, dest, destlen, &copied);
-            return (int)copied;
-        }
-    }
-    else if (SameStrA(data, "title") || SameStrA(data, "artist") ||
-             album || track || publisher || SameStrA(data, "genre")
-             || SameStrA(data, "year") || SameStrA(data, "comment"))
-    {
-        usf_player* player = create_usf_player(fn, true, false);
-        if (player != nullptr)
-        {
-            size_t copied = 0;
-            const std::string& t = player->tags[(album ? "game" : (publisher ? "copyright" : data))];
-            if (!t.empty())
-            {
-                ConvertANSI(t.c_str(), (const int)t.size(), CP_ACP, dest, destlen, nullptr);
-            }
-
-            delete player;
-            return (int)copied;
-        }
-    }
-    else if (SameStrA(data, "length") || length_seconds)
-    {
-        usf_player* player = create_usf_player(fn, true, false);
-        if (player != nullptr)
-        {
-            int ret = 0;
-            const int length = get_player_length(player);
-            I2WStrLen(((length > 0) ? (length / (!length_seconds ? 1 :
-                       1000)) : (!length_seconds ? (180 * 1000) : 180)
-                                      /*TODO*/), dest, destlen, &ret);
-
-            delete player;
-            return ret;
-        }
-    }
-    else if (SameStrA(data, "formatinformation"))
-    {
-        usf_player* player = create_usf_player(fn, true, false);
-        if (player != nullptr)
-        {
-            const auto &usfby = player->tags["usfby"],
-                       &tagger = player->tags["tagger"],
-                       &length = player->tags["length"],
-                       &fade = player->tags["fade"],
-                       &lib = player->tags["_lib"];
-            const bool has_fade = !fade.empty();
-            // TODO localise
-            size_t copied = PrintfCch(dest, destlen, L"Length: %hs\nFade: %hs%s\nRipped by: %hs\nTagged by: %hs\n"
-                                      L"Libfile: %hs", (!length.empty() ? length.c_str() : "<not set>"), (has_fade ?
-                                      fade.c_str() : "<not set>"), (has_fade ? L" seconds" : L""), (!usfby.empty() ?
-                                      usfby.c_str() : "<not provided>"), (!tagger.empty() ? tagger.c_str() :
-                                      "<not provided>"), (!lib.empty() ? lib.c_str() : "<not provided>"));
-
-            delete player;
-            return (int)copied;
-        }
-    }
     else if (SameStrA(data, "bitrate"))
     {
         int ret = 0;
@@ -691,8 +625,91 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
         dest[2] = 0;
         return 2;
     }
+    else if (SameStrA(data, "family"))
+    {
+        LPCWSTR e = FindPathExtension(fn);
+        if ((e != NULL) && (!FastCompare(e, L"USF") || !FastCompare(e, L"MINIUSF")))
+        {
+            size_t copied = 0;
+            LngStringCopyGetLen(IDS_FAMILY_STRING, dest, destlen, &copied);
+            return (int)copied;
+        }
+    }
 
-    return 0;
+    const bool reset = SameStrA(data, "reset");
+
+    // this might sometimes mess up so we'll see if what's
+    // being requested is a reset & if it is then we'll do
+    // a check to see if something else has the lock to do
+    // a quick bail to try to avoid a hang related failure
+    if (!fn || !fn[0] || !GetMetadataLookupLock(&g_info_cs, reset))
+    {
+        return 0;
+    }
+
+    if (reset || !g_metadata_info || !g_metadata_info->filename || !SameStr(fn,
+        g_metadata_info->filename) || HasFileTimeChanged(fn, &ftLastWriteTime))
+    {
+        if (g_metadata_info != nullptr)
+        {
+            delete g_metadata_info;
+            g_metadata_info = nullptr;
+        }
+
+        if (!reset)
+        {
+            g_metadata_info = create_usf_player(fn, true, false);
+        }
+    }
+
+    if (g_metadata_info == nullptr)
+    { 
+        LeaveCriticalSection(&g_info_cs);
+        return 0;
+    }
+
+    int ret = 0;
+    const bool album = SameStrA(data, "album"),
+               track = SameStrA(data, "track"),
+               publisher = SameStrA(data, "publisher"),
+               length_seconds = SameStrA(data, "length_seconds");
+    if (SameStrA(data, "title") || SameStrA(data, "artist") ||
+             album || track || publisher || SameStrA(data, "genre")
+             || SameStrA(data, "year") || SameStrA(data, "comment"))
+    {
+        size_t copied = 0;
+        const std::string& t = g_metadata_info->tags[(album ? "game" : (publisher ? "copyright" : data))];
+        if (!t.empty())
+        {
+            ConvertANSI(t.c_str(), (const int)t.size(), CP_ACP, dest, destlen, nullptr);
+        }
+        ret = (int)copied;
+    }
+    else if (SameStrA(data, "length") || length_seconds)
+    {
+        const int length = get_player_length(g_metadata_info);
+        I2WStrLen(((length > 0) ? (length / (!length_seconds ? 1 :
+                    1000)) : (!length_seconds ? (180 * 1000) : 180)
+                                    /*TODO*/), dest, destlen, &ret);
+    }
+    else if (SameStrA(data, "formatinformation"))
+    {
+        const auto &usfby = g_metadata_info->tags["usfby"],
+                    &tagger = g_metadata_info->tags["tagger"],
+                    &length = g_metadata_info->tags["length"],
+                    &fade = g_metadata_info->tags["fade"],
+                    &lib = g_metadata_info->tags["_lib"];
+        const bool has_fade = !fade.empty();
+        // TODO localise
+        ret = (const int)PrintfCch(dest, destlen, L"Length: %hs\nFade: %hs%s\nRipped by: %hs\nTagged by: %hs\n"
+                                   L"Libfile: %hs", (!length.empty() ? length.c_str() : "<not set>"), (has_fade ?
+                                   fade.c_str() : "<not set>"), (has_fade ? L" seconds" : L""), (!usfby.empty() ?
+                                   usfby.c_str() : "<not provided>"), (!tagger.empty() ? tagger.c_str() :
+                                   "<not provided>"), (!lib.empty() ? lib.c_str() : "<not provided>"));
+    }
+
+    LeaveCriticalSection(&g_info_cs);
+    return ret;
 }
 
 extern "C" __declspec(dllexport) intptr_t winampGetExtendedRead_openW(const wchar_t* filename, int* size,
