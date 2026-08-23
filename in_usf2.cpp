@@ -11,7 +11,7 @@
 #include <vector>
 #include "resource.h"
 
-#define PLUGIN_VER L"0.9.8"
+#define PLUGIN_VER L"1.0"
 
 // wasabi based services for localisation support
 SETUP_API_LNG_VARS;
@@ -102,7 +102,7 @@ extern In_Module plugin;
 usf_player* g_player = nullptr, *g_metadata_info = nullptr;
 HANDLE decode_thread = nullptr;
 int g_length = -1, g_seek_needed = -1;
-bool paused = false;
+bool is_paused = false;
 CRITICAL_SECTION g_player_cs = {}, g_info_cs = {};
 FILETIME ftLastWriteTime = {};
 
@@ -246,8 +246,7 @@ DWORD WINAPI DecodeThread(void* param)
             {
                 if (dsp_isactive)
                 {
-                    plugin.dsp_dosamples((short int*)sample_buffer, (int)
-                                      count, 16, nch, 44100) * (nch * 2);
+                    plugin.dsp_dosamples((short int*)sample_buffer, (int)count, 16, nch, 44100);
                 }
 
                 plugin.SAAddPCMData((char*)sample_buffer, nch, 16, plugin.outMod->GetWrittenTime());
@@ -330,7 +329,7 @@ void stop()
         }
     }
 
-    paused = false;
+    is_paused = false;
 
     if (plugin.outMod && plugin.outMod->Close)
     {
@@ -416,9 +415,10 @@ int play(const in_char* filename)
     return 1;
 }
 
+#ifndef _WIN64
 static void pause(void)
 {
-    paused = true;
+    is_paused = true;
 
     if (plugin.outMod)
     {
@@ -428,17 +428,28 @@ static void pause(void)
 
 static void unpause(void)
 {
-    paused = false;
+    is_paused = false;
 
     if (plugin.outMod)
     {
         plugin.outMod->Pause(0);
     }
 }
+#else
+static void setpause(const int paused)
+{
+    is_paused = paused;
+
+    if (plugin.outMod)
+    {
+        plugin.outMod->Pause(paused);
+    }
+}
+#endif
 
 static int ispaused(void)
 {
-    return paused;
+    return is_paused;
 }
 
 int getlength()
@@ -540,8 +551,12 @@ In_Module plugin =
     nullptr,
     nullptr,
     play,
+#ifndef _WIN64
     pause,
     unpause,
+#else
+    setpause,
+#endif
     ispaused,
     stop,
     getlength,
