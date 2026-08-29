@@ -370,9 +370,16 @@ int get_player_length(usf_player* player)
              tags["fade"].c_str())) : (180 * 1000)/*TODO*/);
 }
 
+#ifndef _WIN64
 int play(const in_char* filename)
+#else
+int play(const in_char* filename, const int seek_offset)
+#endif
 {
     g_length = -1;
+#ifdef _WIN64
+    g_seek_needed = seek_offset;
+#endif
 
     const bool convert_to_mono = PlaybackIsMono();
     usf_player* player = create_usf_player(filename, false, convert_to_mono);
