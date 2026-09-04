@@ -11,7 +11,7 @@
 #include <vector>
 #include "resource.h"
 
-#define PLUGIN_VER L"1.0"
+#define PLUGIN_VER L"1.0.1"
 
 // wasabi based services for localisation support
 SETUP_API_LNG_VARS;
@@ -734,8 +734,8 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
     return ret;
 }
 
-extern "C" __declspec(dllexport) intptr_t winampGetExtendedRead_openW(const wchar_t* filename, int* size,
-																	      int* bps, int* nch, int* srate)
+extern "C" __declspec(dllexport) intptr_t winampGetExtendedRead_openW(const wchar_t* filename, size_t* size,
+																	         int* bps, int* nch, int* srate)
 {
     usf_player* this_player = create_usf_player(filename, false, false);
     if (this_player != nullptr)
@@ -758,7 +758,7 @@ extern "C" __declspec(dllexport) intptr_t winampGetExtendedRead_openW(const wcha
         if (size)
         {
             // TODO
-            *size = -1;
+            *size = (size_t)-1;
         }
         return (intptr_t)this_player;
     }
