@@ -470,12 +470,12 @@ int getoutputtime()
                                 plugin.outMod->GetOutputTime() : 0));
 }
 
-static void setoutputtime(int time_in_ms)
+static void setoutputtime(const int time_in_ms)
 {
     g_seek_needed = time_in_ms;
 }
 
-static void setvolume(int volume)
+static void setvolume(const int volume)
 {
     if (plugin.outMod && plugin.outMod->SetVolume)
     {
@@ -483,7 +483,7 @@ static void setvolume(int volume)
     }
 }
 
-static void setpan(int pan)
+static void setpan(const int pan)
 {
     if (plugin.outMod && plugin.outMod->SetPan)
     {
@@ -694,10 +694,11 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
     const bool album = SameStrA(data, "album"),
                track = SameStrA(data, "track"),
                publisher = SameStrA(data, "publisher"),
-               length_seconds = SameStrA(data, "length_seconds");
+               length = SameStrNA(data, "length", 6),
+			   length_seconds = (length ? SameStrA((data + 6), "_seconds") : false);;
     if (SameStrA(data, "title") || SameStrA(data, "artist") ||
-             album || track || publisher || SameStrA(data, "genre")
-             || SameStrA(data, "year") || SameStrA(data, "comment"))
+        album || track || publisher || SameStrA(data, "genre")
+        || SameStrA(data, "year") || SameStrA(data, "comment"))
     {
         size_t copied = 0;
         const std::string& t = g_metadata_info->tags[(album ? "game" : (publisher ? "copyright" : data))];
@@ -707,7 +708,7 @@ extern "C" __declspec(dllexport) int winampGetExtendedFileInfoW(const wchar_t* f
         }
         ret = (int)copied;
     }
-    else if (SameStrA(data, "length") || length_seconds)
+    else if (length || length_seconds)
     {
         const int length = get_player_length(g_metadata_info);
         I2WStrLen(((length > 0) ? (length / (!length_seconds ? 1 :
