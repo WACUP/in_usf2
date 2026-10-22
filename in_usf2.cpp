@@ -11,7 +11,7 @@
 #include <vector>
 #include "resource.h"
 
-#define PLUGIN_VER L"1.0.1"
+#define PLUGIN_VER L"1.0.2"
 
 // wasabi based services for localisation support
 SETUP_API_LNG_VARS;
@@ -386,7 +386,7 @@ int play(const in_char* filename, const int seek_offset)
     if (player != nullptr)
     {
         const int nch = (!convert_to_mono ? 2 : 1),
-                  maxlatency = plugin.outMod->Open(44100, nch, 16, -1, -1);
+                  maxlatency = OpenOutputPlugin(&plugin, 44100, nch, 16);
         if (maxlatency < 0)
         {
             delete player;
